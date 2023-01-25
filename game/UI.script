@@ -1,0 +1,15 @@
+-- Hash ID para interagir com o cenario
+local input_x = hash("key_x")
+
+-- Habilita o game interface
+function init(self)
+	msg.post(".", "acquire_input_focus")
+	msg.post("UI", "enable")
+end
+
+-- Fecha o game interface com o input X
+function on_input(self, action_id, action)
+	if (action_id == input_x and action.released) then
+		msg.post("UI", "disable")
+	end
+end

@@ -1,0 +1,172 @@
+-- Logica do Inimigo
+
+-- Velocidade maxima do inimigo
+local max_speed = 50
+-- Gravidade do inimigo
+local gravity = -1000
+-- Aceleração do inimigo
+local move_accel = 200
+-- Variaveis do inimigo
+local ground_contact = false
+local wall_contact = false
+local player_contact = false
+
+
+
+
+-- Hash IDS para interagir com o cenario
+local msg_contact_point_response = hash("contact_point_response")
+local msg_collision_response = hash("collision_response")
+local msg_trigger_response = hash("trigger_response")
+local group_obstacle = hash("ground")
+local group_invisible_wall = hash("invisible_walls")
+local group_player = hash("player")
+local anim_walk = hash("run")
+
+
+function init(self)
+	-- Permite o uso dos inputs do inimigo
+	msg.post(".", "acquire_input_focus")
+
+	-- velocidade inicial do player
+	self.velocity = vmath.vector3(0, 0, 0)
+	-- Variavel de suporte para lidar com alteraçoes de colisão
+	-- self.correction = vmath.vector3()
+	-- Se o inimigo está em contato com o chão
+	-- self.ground_contact = false
+	-- Animação atual
+	self.anim = nil
+	-- Direção atual do inimigo
+	self.movement = 1
+end
+
+local function play_animation(self, anim)
+	-- Verifica se a animação já está ativa
+	if self.anim ~= anim then
+		--msg.post("enemyMud#sprite", "play_animation",{id=anim})
+		-- Muda a animção do sprite
+		sprite.play_flipbook("#sprite", anim)
+		-- Salva a animação atual
+		self.anim = anim
+	end
+end
+
+local function update_animations(self)
+	-- Confere se o sprite está na direção correta
+	sprite.set_hflip("#sprite", self.movement < 0)
+	-- Confere se os hitbox estão na direção correta
+	if self.movement < 0 then
+		physics.set_hflip("#collisionMud", true)
+		physics.set_hflip("#hitbox", true)
+	else
+		physics.set_hflip("#collisionMud", false)
+		physics.set_hflip("#hitbox", false)
+	end
+	play_animation(self, anim_walk)
+end
+
+function doMove(self, dt)
+	-- Velocidade atual do inimigo
+	local target_speed = self.movement * max_speed
+	-- Diferença de velocidade
+	local speed_diff = target_speed - self.velocity.x
+	-- Aceleração
+	local accel = vmath.vector3(0, gravity, 0)
+	-- Muda a direção do movimento
+	if (speed_diff ~= 0) then
+		if (speed_diff < 0) then
+			accel.x =- move_accel
+		else
+			accel.x = move_accel
+		end
+	end
+
+	local dv = accel * dt
+	if (math.abs(dv.x) > math.abs(speed_diff)) then
+		dv.x = speed_diff
+	end
+
+	local v0 = self.velocity
+	self.velocity = self.velocity + dv
+
+	local dp = (v0 + self.velocity) * dt
+	-- Atualiza a posição do inimigo
+	go.set_position(go.get_position() + dp)
+
+end
+
+function update(self, dt)
+	-- Roda as verificações de animação e redefine as variaveis
+	doMove(self, dt)
+
+	update_animations(self)
+
+	self.correction = vmath.vector3()
+
+	self.ground_contact = false
+	self.wall_contact = false
+	self.player_contact = false
+end
+
+local function handle_obstacle_contact(self, normal, distance)
+	-- Gravidade (Colisão com o chão)
+	local proj = vmath.dot(self.correction, normal)
+	local comp = (distance - proj) * normal
+
+	self.correction = self.correction + comp
+
+	go.set_position(go.get_position() + comp)
+
+	if normal.y > 0.7 then
+		self.ground_contact = true
+	end
+
+	proj = vmath.dot(self.velocity, normal)
+	if proj < 0 then
+		self.velocity = self.velocity - proj * normal
+	end
+end
+
+local function handle_wall_contact(self, normal, distance)
+	-- Colisão com as paredes invisiveis
+	local proj = vmath.dot(self.correction, normal)
+	local comp = (distance - proj) * normal
+
+	self.correction = self.correction + comp
+
+	go.set_position(go.get_position() + comp)
+
+	self.wall_contact = true
+	self.movement = normal.x
+	
+
+	proj = vmath.dot(self.velocity, normal)
+	if proj < 0 then
+		self.velocity = self.velocity - proj * normal
+	end
+end
+
+local function handle_player_contact(self, normal, distance)
+	player_contact = true
+
+end
+
+function on_message(self, message_id, message, sender)
+	-- Recebe as mensagens de colisão 
+	if message_id == msg_contact_point_response then
+		-- Colisão com o chão
+		if message.group == group_obstacle then
+			handle_obstacle_contact(self, message.normal, message.distance)
+		-- Colisão com as paredes invisiveis
+		elseif message.group == group_invisible_wall and not self.wall_contact then
+			handle_wall_contact(self, message.normal, message.distance)
+		end
+	end
+	-- Recebe as mensagens de colisão
+	if message_id == msg_collision_response then
+		-- Colisão com o player
+		if message.group == group_player and not self.player_contact then
+			handle_player_contact(self, message.normal, message.distance)
+		end
+	end
+end
